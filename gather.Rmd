@@ -1,0 +1,169 @@
+---
+title: "Data"
+author: "Sara Park"
+date: "10/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(shiny)
+library(ggplot2)
+library(tidyverse)
+library(dplyr, warn.conflicts = FALSE)
+library(ggforce)
+library(rstanarm)
+library(gtsummary)
+library(gt)
+library(broom.mixed)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, Democracy, Autocracy, Polity1 and Polity 2 Graphs}
+
+# I got the vdem dataset from Dan from their github. 
+# I have to clean the data. I used data greater than the year 1900 because
+# I want to work with semi-recent history but also capture relevant trends
+# in democracy and polity from my understanding.
+# I selected the variables I wished to use later. This included the data for
+# the polity, revised polity, democracy, and autocracy scores.
+# Had to rename country_text_id because I will later merge this dataset with
+# another for my statistical model. 
+
+vdem1 <- vdem %>% 
+  filter(year > 1900) %>% 
+  select(country_name, country_text_id, year,  
+         e_p_polity, e_polity2, e_democ, e_autoc) %>% 
+  rename("LOCATION" = "country_text_id") %>% 
+  drop_na() 
+
+# Wrote vdem1 into a csv so it would be easier to use in my app.
+
+write.csv(vdem1, "finalproject/vdem1.csv")
+```
+
+```{r}
+
+# I read in a csv that I made that had all the country names and the 
+# the continents they were on because I wanted to facet wrap my graphs from
+# oecd_data by country. 
+
+country_continent <- read_csv("finalproject/country_continent.csv",
+                              col_types = cols(LOCATION = col_character(),
+                                               Continent = col_character()))
+
+# I read in the data I downloaded from oecd into an object called oecd_data.
+# I selected relevant variables. 
+
+oecd_data <- read_csv("finalproject/oecd_data.csv",
+                      col_types = cols(
+                                  LOCATION = col_character(),
+                                  INDICATOR = col_character(),
+                                  SUBJECT = col_character(),
+                                  MEASURE = col_character(),
+                                  FREQUENCY = col_character(),
+                                  TIME = col_double(),
+                                  Value = col_double(),
+                                  `Flag Codes` = col_logical()))  %>% 
+            select(LOCATION, SUBJECT, TIME, Value) %>% 
+            arrange()
+
+# As I mentioned earlier, I joined oecd_data and country_continent so that 
+# there was a variable for continents.
+
+oecd_country_continent <- left_join(oecd_data, country_continent,
+                   by = "LOCATION", 
+                   keep = FALSE, 
+                   na_matches = c("na", "never")) 
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "DISCRIMFAMCODE")] <- "Discriminatory Family Code"
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "RESTRCIVLIB")] <- "Restricted Civil Liberty"
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "RESTRRESASSETS")] <- "Restricted Resources 
+                                                    and Assets"
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "RESTRPHYSINTEG")] <- "Restricted Physical 
+                                                    Integrity"
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "RESTRREASSETS")] <- "Restricted Resources and 
+                                                   Assets"
+
+oecd_country_continent$SUBJECT[which(oecd_country_continent$SUBJECT 
+                          == "TOT")] <- "Total"
+
+# I wrote in my joined data as a csv so that it would be more accessible
+# as I worked with my map. 
+
+write.csv(oecd_country_continent, "finalproject/oecd_country_continent.csv")
+```
+
+
+```{r, code for statistical models}
+
+# Here I left_joined the oecd_country_continent and vdem1 by the country 
+# abbreviation. 
+
+modeldata <- left_join(oecd_country_continent, vdem1,
+                   by = "LOCATION",
+                   keep = FALSE,
+                   na_matches = c("na", "never")) 
+
+# Using model_data, I pivoted wider to have my the SUBJECT variable that
+# contained different forms of institutional gender discrimination so that
+# they became variables.
+
+modeldata2 <- modeldata %>% 
+  pivot_wider(names_from = "SUBJECT",
+               values_from = "Value") %>% 
+  drop_na()
+
+# Wrote in the modeldata2 data I just created above. 
+
+write.csv(modeldata2, "finalproject/modeldata2.csv")
+
+# Created all of my stan_glm models for each dimension of discriminatory
+# social institutions and saved them into objects.
+
+model_discrimfamcode <- stan_glm(data = modeldata2,
+                  refresh = 0,
+                  family = gaussian(),
+                  formula = `Discriminatory Family Code` ~ e_polity2 + year)
+
+model_restrcivlib <- stan_glm(data = modeldata2,
+                  refresh = 0,
+                  family = gaussian(),
+                  formula = `Restricted Civil Liberty` ~ e_polity2 + year)
+
+model_restrresassets <- stan_glm(data = modeldata2,
+                  refresh = 0,
+                  family = gaussian(),
+                  formula = `Restricted Resources and Assets` ~ e_polity2 + 
+                             year)
+
+model_tot <- stan_glm(data = modeldata2,
+                  refresh = 0,
+                  family = gaussian(),
+                  formula = `Total` ~ e_polity2 + year)
+
+model_restrphysinteg <- stan_glm(data = modeldata2,
+                  refresh = 0,
+                  family = gaussian(),
+                  formula = `Restricted Physical Integrity` ~ e_polity2 + year)
+
+# I saved these models into RDS so that I could read them in my appy easier. 
+
+saveRDS(model_discrimfamcode, "model_discrimfamcode.RDS")
+saveRDS(model_restrcivlib, "model_restrcivlib.RDS")
+saveRDS(model_restrresassets, "model_restrresassets.RDS")
+saveRDS(model_tot, "model_tot.RDS")
+saveRDS(model_restrphysinteg, "model_restrphysinteg.RDS")
+```
+
+
+
+
